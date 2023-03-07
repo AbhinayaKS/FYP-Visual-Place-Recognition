@@ -42,10 +42,10 @@ parser.add_argument('--lrGamma', type=float, default=0.5, help='Multiply LR by G
 parser.add_argument('--weightDecay', type=float, default=0.001, help='Weight decay for SGD.')
 parser.add_argument('--momentum', type=float, default=0.9, help='Momentum for SGD.')
 parser.add_argument('--nocuda', action='store_true', help='Dont use cuda')
-parser.add_argument('--threads', type=int, default=8, help='Number of threads for each data loader to use')
+parser.add_argument('--threads', type=int, default=2, help='Number of threads for each data loader to use')
 parser.add_argument('--seed', type=int, default=123, help='Random seed to use.')
-parser.add_argument('--dataPath', type=str, default='/nfs/ibrahimi/data/', help='Path for centroid data.')
-parser.add_argument('--runsPath', type=str, default='/nfs/ibrahimi/runs/', help='Path to save runs to.')
+parser.add_argument('--dataPath', type=str, default='/home/FYP/abhinaya002/data/', help='Path for centroid data.')
+parser.add_argument('--runsPath', type=str, default='/home/FYP/abhinaya002/runs/', help='Path to save runs to.')
 parser.add_argument('--savePath', type=str, default='checkpoints', 
         help='Path to save checkpoints to in logdir. Default=checkpoints/')
 parser.add_argument('--cachePath', type=str, default=environ['TMPDIR'], help='Path to save cache to.')
@@ -376,7 +376,7 @@ if __name__ == "__main__":
     pretrained = not opt.fromscratch
     if opt.arch.lower() == 'alexnet':
         encoder_dim = 256
-        encoder = models.alexnet(pretrained=pretrained)
+        encoder = models.alexnet(weights= models.AlexNet_Weights.IMAGENET1K_V1 if pretrained else null)
         # capture only features and remove last relu and maxpool
         layers = list(encoder.features.children())[:-2]
 
@@ -388,7 +388,7 @@ if __name__ == "__main__":
 
     elif opt.arch.lower() == 'vgg16':
         encoder_dim = 512
-        encoder = models.vgg16(pretrained=pretrained)
+        encoder = models.vgg16(weights=models.VGG16_Weights.IMAGENET1K_V1 if pretrained else null)
         # capture only feature part and remove last relu and maxpool
         layers = list(encoder.features.children())[:-2]
 
