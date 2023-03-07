@@ -12,7 +12,7 @@ from PIL import Image
 from sklearn.neighbors import NearestNeighbors
 import h5py
 
-root_dir = '/nfs/ibrahimi/data/pittsburgh/'
+root_dir = '/home/FYP/abhinaya002/data/pittsburgh/'
 if not exists(root_dir):
     raise FileNotFoundError('root_dir is hardcoded, please adjust to point to Pittsburth dataset')
 
@@ -130,7 +130,7 @@ class WholeDatasetFromStruct(data.Dataset):
         # positives for evaluation are those within trivial threshold range
         #fit NN to find them, search by radius
         if  self.positives is None:
-            knn = NearestNeighbors(n_jobs=-1)
+            knn = NearestNeighbors()
             knn.fit(self.dbStruct.utmDb)
 
             self.distances, self.positives = knn.radius_neighbors(self.dbStruct.utmQ,
@@ -181,7 +181,7 @@ class QueryDatasetFromStruct(data.Dataset):
 
         # potential positives are those within nontrivial threshold range
         #fit NN to find them, search by radius
-        knn = NearestNeighbors(n_jobs=-1)
+        knn = NearestNeighbors()
         knn.fit(self.dbStruct.utmDb)
 
         # TODO use sqeuclidean as metric?
@@ -218,7 +218,7 @@ class QueryDatasetFromStruct(data.Dataset):
             qFeat = h5feat[index+qOffset]
 
             posFeat = h5feat[self.nontrivial_positives[index].tolist()]
-            knn = NearestNeighbors(n_jobs=-1) # TODO replace with faiss?
+            knn = NearestNeighbors() # TODO replace with faiss?
             knn.fit(posFeat)
             dPos, posNN = knn.kneighbors(qFeat.reshape(1,-1), 1)
             dPos = dPos.item()
@@ -227,7 +227,7 @@ class QueryDatasetFromStruct(data.Dataset):
             negSample = np.random.choice(self.potential_negatives[index], self.nNegSample)
             negSample = np.unique(np.concatenate([self.negCache[index], negSample]))
 
-            negFeat = h5feat[negSample.tolist()]
+            negFeat = h5feat[negSample.astype(int).tolist()]
             knn.fit(negFeat)
 
             dNeg, negNN = knn.kneighbors(qFeat.reshape(1,-1), 
