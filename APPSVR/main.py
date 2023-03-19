@@ -23,9 +23,10 @@ import faiss
 from tensorboardX import SummaryWriter
 import numpy as np
 import netvlad
+import semantic
 
 parser = argparse.ArgumentParser(description='pytorch-NetVlad')
-parser.add_argument('--mode', type=str, default='train', help='Mode', choices=['train', 'test', 'cluster'])
+parser.add_argument('--mode', type=str, default='train', help='Mode', choices=['train', 'test', 'cluster','label'])
 parser.add_argument('--batchSize', type=int, default=4, 
         help='Number of triplets (query, pos, negs). Each triplet consists of 12 images.')
 parser.add_argument('--cacheBatchSize', type=int, default=24, help='Batch size for caching and testing')
@@ -56,7 +57,7 @@ parser.add_argument('--evalEvery', type=int, default=1,
         help='Do a validation set run, and save, every N epochs.')
 parser.add_argument('--patience', type=int, default=10, help='Patience for early stopping. 0 is off.')
 parser.add_argument('--dataset', type=str, default='pittsburgh', 
-        help='Dataset to use', choices=['pittsburgh'])
+        help='Dataset to use', choices=['pittsburgh', 'tokyo247'])
 parser.add_argument('--arch', type=str, default='vgg16', 
         help='basenetwork to use', choices=['vgg16', 'alexnet'])
 parser.add_argument('--vladv2', action='store_true', help='Use VLAD v2')
@@ -67,6 +68,7 @@ parser.add_argument('--margin', type=float, default=0.1, help='Margin for triple
 parser.add_argument('--split', type=str, default='val', help='Data split to use for testing. Default is val', 
         choices=['test', 'test250k', 'train', 'val'])
 parser.add_argument('--fromscratch', action='store_true', help='Train from scratch rather than using pretrained models')
+parser.add_argument('--includeSemantic', type=bool, default=False, help='Specifies whether semantic information be included for training.')
 
 def train(epoch):
     epoch_loss = 0
@@ -83,22 +85,32 @@ def train(epoch):
     nBatches = (len(train_set) + opt.batchSize - 1) // opt.batchSize
 
     for subIter in range(subsetN):
-        print('====> Building Cache')
+        print('====> Building Cache')        
         model.eval()
         train_set.cache = join(opt.cachePath, train_set.whichSet + '_feat_cache.hdf5')
+        with h5py.File(labelCache, mode='r') as h5:
+            labels = h5.get("labels")[...]
+            print("====> Shape of labels read is " + str(labels.shape))
+        #'''
         with h5py.File(train_set.cache, mode='w') as h5: 
             pool_size = encoder_dim
             if opt.pooling.lower() == 'netvlad': pool_size *= opt.num_clusters
             h5feat = h5.create_dataset("features", 
                     [len(whole_train_set), pool_size], 
                     dtype=np.float32)
+
             with torch.no_grad():
                 for iteration, (input, indices) in enumerate(whole_training_data_loader, 1):
                     input = input.to(device)
+                    labelsBatch = labels[indices.detach().numpy(), :]
                     image_encoding = model.encoder(input)
-                    vlad_encoding = model.pool(image_encoding) 
+                    vlad_encoding = model.pool(image_encoding, labelsBatch) 
                     h5feat[indices.detach().numpy(), :] = vlad_encoding.detach().cpu().numpy()
                     del input, image_encoding, vlad_encoding
+
+                    if iteration % 50 == 0 or len(whole_training_data_loader) <= 10:
+                    	print("==> Batch ({}/{})".format(iteration, ceil(len(whole_train_set)/opt.cacheBatchSize)), flush=True)
+        #'''
 
         sub_train_set = Subset(dataset=train_set, indices=subsetIdx[subIter])
 
@@ -116,13 +128,16 @@ def train(epoch):
             # where N = batchSize * (nQuery + nPos + nNeg)
             if query is None: continue # in case we get an empty batch
 
+            if iteration < 1500: continue #Added to make it finish
+            
             B, C, H, W = query.shape
             nNeg = torch.sum(negCounts)
             input = torch.cat([query, positives, negatives])
-
+            
             input = input.to(device)
+            labelsBatch = labels[indices, :]
             image_encoding = model.encoder(input)
-            vlad_encoding = model.pool(image_encoding) 
+            vlad_encoding = model.pool(image_encoding, labelsBatch) 
 
             vladQ, vladP, vladN = torch.split(vlad_encoding, [B, B, nNeg])
 
@@ -147,6 +162,7 @@ def train(epoch):
             epoch_loss += batch_loss
 
             if iteration % 50 == 0 or nBatches <= 10:
+                save_checkpoint({'epoch': epoch, 'state_dict': model.state_dict(),  'optimizer' : optimizer.state_dict(), 'parallel' : isParallel,}, is_best)
                 print("==> Epoch[{}]({}/{}): Loss: {:.4f}".format(epoch, iteration, 
                     nBatches, batch_loss), flush=True)
                 writer.add_scalar('Train/Loss', batch_loss, 
@@ -180,11 +196,16 @@ def test(eval_set, epoch=0, write_tboard=False):
         pool_size = encoder_dim
         if opt.pooling.lower() == 'netvlad': pool_size *= opt.num_clusters
         dbFeat = np.empty((len(eval_set), pool_size))
+        with h5py.File(labelCache, mode='r') as h5: 
+            labels = h5.get("labels")[...]
+            print(labels.shape)
 
         for iteration, (input, indices) in enumerate(test_data_loader, 1):
+
             input = input.to(device)
+            labelsBatch = labels[indices, :]
             image_encoding = model.encoder(input)
-            vlad_encoding = model.pool(image_encoding) 
+            vlad_encoding = model.pool(image_encoding, labelsBatch) 
 
             dbFeat[indices.detach().numpy(), :] = vlad_encoding.detach().cpu().numpy()
             if iteration % 50 == 0 or len(test_data_loader) <= 10:
@@ -276,6 +297,35 @@ def get_clusters(cluster_set):
         h5.create_dataset('centroids', data=kmeans.centroids)
         print('====> Done!')
 
+def get_labels(label_set):
+
+    data_loader = DataLoader(dataset=label_set, 
+                num_workers=opt.threads, batch_size=opt.cacheBatchSize, shuffle=False, 
+                pin_memory=cuda)
+
+    if not exists(join(opt.dataPath, 'labels')):
+        makedirs(join(opt.dataPath, 'labels'))
+
+    initcache = join(opt.dataPath, 'labels', opt.arch + '_' + label_set.dataset + '_' + '_labels.hdf5')
+    with h5py.File(initcache, mode='w') as h5: 
+        with torch.no_grad():
+            model.eval()
+            print('====> Extracting Labels')
+            labelsDataset = h5.create_dataset("labels", [len(whole_train_set), 30, 40], dtype=np.float32)
+            print(labelsDataset.shape)
+            for iteration, (input, indices) in enumerate(data_loader, 1):
+                input = input.to(device)
+                labels = model.generateLabels(input)
+                labelsDataset[indices.detach().numpy(), :] = labels.cpu().numpy()
+                if iteration % 50 == 0 or len(data_loader) <= 10:
+                    print("==> Batch ({}/{})".format(iteration, 
+                        ceil(len(whole_train_set)/opt.cacheBatchSize)), flush=True)
+                del input, labels
+
+        print('====> Storing labels', labelsDataset.shape)
+        print('====> Done!')
+
+
 def save_checkpoint(state, is_best, filename='checkpoint.pth.tar'):
     model_out_path = join(opt.savePath, filename)
     torch.save(state, model_out_path)
@@ -325,6 +375,8 @@ if __name__ == "__main__":
 
     if opt.dataset.lower() == 'pittsburgh':
         import pittsburgh as dataset
+    elif opt.dataset.lower() == 'tokyo247':
+        import tokyo247 as dataset
     else:
         raise Exception('Unknown dataset')
 
@@ -352,6 +404,20 @@ if __name__ == "__main__":
         print('====> Training query set:', len(train_set))
         whole_test_set = dataset.get_whole_val_set()
         print('===> Evaluating on val set, query count:', whole_test_set.dbStruct.numQ)
+    elif opt.mode.lower() == 'label':
+        whole_train_set = dataset.get_whole_training_set()
+        whole_training_data_loader = DataLoader(dataset=whole_train_set, 
+                num_workers=opt.threads, batch_size=opt.cacheBatchSize, shuffle=False, 
+                pin_memory=cuda)
+
+        train_set = dataset.get_training_query_set(opt.margin)
+
+        print('====> Training query set:', len(train_set))
+        whole_test_set = dataset.get_whole_val_set()
+        print('===> Evaluating on val set, query count:', whole_test_set.dbStruct.numQ)
+        print('===> Whole dataset Length:', len(whole_train_set))
+
+
     elif opt.mode.lower() == 'test':
         if opt.split.lower() == 'test':
             whole_test_set = dataset.get_whole_test_set()
@@ -379,7 +445,7 @@ if __name__ == "__main__":
         encoder = models.alexnet(weights= models.AlexNet_Weights.IMAGENET1K_V1 if pretrained else null)
         # capture only features and remove last relu and maxpool
         layers = list(encoder.features.children())[:-2]
-
+ 
         if pretrained:
             # if using pretrained only train conv5
             for l in layers[:-1]:
@@ -398,14 +464,26 @@ if __name__ == "__main__":
                 for p in l.parameters():
                     p.requires_grad = False
 
-    if opt.mode.lower() == 'cluster' and not opt.vladv2:
+    if opt.mode.lower() == 'cluster' and not opt.vladv2 and opt.mode.lower() != 'label':
         layers.append(L2Norm())
 
     encoder = nn.Sequential(*layers)
     model = nn.Module() 
     model.add_module('encoder', encoder)
+    if opt.mode.lower() == 'label':
+        generateLabels = semantic.SemanticLabels()
+        model.add_module('generateLabels', generateLabels)
 
-    if opt.mode.lower() != 'cluster':
+    if opt.mode.lower() != 'cluster' and opt.mode.lower() != 'label':
+        if opt.includeSemantic:
+            generateLabels = semantic.SemanticLabels()
+            model.add_module('generateLabels', generateLabels)
+            labelCache = join(opt.dataPath, 'labels', opt.arch + '_' + train_set.dataset + '_' + '_labels.hdf5')
+            if opt.mode.lower() == 'train':
+                if not exists(labelCache):
+                    raise FileNotFoundError('Could not find labels, please run with --mode=label before proceeding')
+
+
         if opt.pooling.lower() == 'netvlad':
             net_vlad = netvlad.NetVLAD(num_clusters=opt.num_clusters, dim=encoder_dim, vladv2=opt.vladv2)
             if not opt.resume: 
@@ -436,7 +514,7 @@ if __name__ == "__main__":
     isParallel = False
     if opt.nGPU > 1 and torch.cuda.device_count() > 1:
         model.encoder = nn.DataParallel(model.encoder)
-        if opt.mode.lower() != 'cluster':
+        if opt.mode.lower() != 'cluster' and opt.mode.lower() != 'label':
             model.pool = nn.DataParallel(model.pool)
         isParallel = True
 
@@ -488,6 +566,9 @@ if __name__ == "__main__":
     elif opt.mode.lower() == 'cluster':
         print('===> Calculating descriptors and clusters')
         get_clusters(whole_train_set)
+    elif opt.mode.lower() == 'label':
+        print('===> Creating labels dataset')
+        get_labels(whole_train_set)
     elif opt.mode.lower() == 'train':
         print('===> Training model')
         writer = SummaryWriter(log_dir=join(opt.runsPath, datetime.now().strftime('%b%d_%H-%M-%S')+'_'+opt.arch+'_'+opt.pooling))
@@ -508,7 +589,7 @@ if __name__ == "__main__":
         best_score = 0
         for epoch in range(opt.start_epoch+1, opt.nEpochs + 1):
             if opt.optim.upper() == 'SGD':
-                scheduler.step(epoch)
+                scheduler.step()
             train(epoch)
             if (epoch % opt.evalEvery) == 0:
                 recalls = test(whole_test_set, epoch, write_tboard=True)
@@ -519,14 +600,7 @@ if __name__ == "__main__":
                 else: 
                     not_improved += 1
 
-                save_checkpoint({
-                        'epoch': epoch,
-                        'state_dict': model.state_dict(),
-                        'recalls': recalls,
-                        'best_score': best_score,
-                        'optimizer' : optimizer.state_dict(),
-                        'parallel' : isParallel,
-                }, is_best)
+                save_checkpoint({'epoch': epoch, 'state_dict': model.state_dict(), 'recalls': recalls, 'best_score': best_score, 'optimizer' : optimizer.state_dict(), 'parallel' : isParallel,}, is_best)
 
                 if opt.patience > 0 and not_improved > (opt.patience / opt.evalEvery):
                     print('Performance did not improve for', opt.patience, 'epochs. Stopping.')
