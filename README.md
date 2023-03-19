@@ -70,3 +70,4 @@ In the case of training the model with semantic segmentation, please run the mai
 python main.py --mode=label --arch=vgg16 --pooling=netvlad --num_clusters=64
 ```
 Next, for training, execute the above two training commands with the --includeSemantic flag set to True.
+</div>
