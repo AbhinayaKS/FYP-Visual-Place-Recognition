@@ -1,0 +1,13 @@
+pytorch
+torchvision
+pytorch-cuda=11.7
+faiss-gpu
+#opencv
+tensorboardx
+#fvcore
+#iopath
+#pycocotools
+#omegaconf
+numpy
+scikit-learn
+h5py
