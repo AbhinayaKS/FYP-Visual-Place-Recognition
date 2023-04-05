@@ -2,7 +2,7 @@ from __future__ import print_function
 import torch
 import torch.nn as nn
 import torchvision.models as models
-import h5py
+from io import BytesIO
 import faiss
 import numpy as np
 from netvlad import NetVLAD
@@ -14,7 +14,7 @@ import torchvision.transforms as transforms
 from PIL import Image
 import json
 
-from flask import Flask
+from flask import Flask, request, send_file
 from flask_restful import Resource, Api
 
 app = Flask(__name__)
@@ -70,33 +70,43 @@ class getNearestNeighbours(Resource):
             descriptors = torch.empty(10, 32768).to(device)
             query = torch.empty(1, 32768).to(device)
             count = 0
+            if 'image' in request.args:
+                image = request.args['image']
+                img = Image.open('data/' + image)
+                img = transform_pipeline(img)
+                img = img.unsqueeze(0)  
+                img = Variable(img)
+                img = img.to(device)
+                image_encoding = model.encoder(img)
+                vlad_encoding = model.pool(image_encoding)
+                query[count] = vlad_encoding
+            else:
+                return {'error': 'No image specified'}
+            
             for file in os.listdir('data/'):
                 if file.endswith(".png"):
-                    print(file)
-                    if file == 'primeArea3.png':
-                        img = Image.open('data/' + file)
-                        img = transform_pipeline(img)
-                        img = img.unsqueeze(0)  
-                        img = Variable(img)
-                        img = img.to(device)
-                        image_encoding = model.encoder(img)
-                        vlad_encoding = model.pool(image_encoding)
-                        query[0] = vlad_encoding
-                    else:
-                        img = Image.open('data/' + file)
-                        img = transform_pipeline(img)
-                        img = img.unsqueeze(0)  
-                        img = Variable(img)
-                        img = img.to(device)
-                        image_encoding = model.encoder(img)
-                        vlad_encoding = model.pool(image_encoding)
-                        descriptors[count] = vlad_encoding
+                    if file == 'primeArea.png':
+                        continue
+                    img = Image.open('data/' + file)
+                    img = transform_pipeline(img)
+                    img = img.unsqueeze(0)  
+                    img = Variable(img)
+                    img = img.to(device)
+                    image_encoding = model.encoder(img)
+                    vlad_encoding = model.pool(image_encoding)
+                    descriptors[count] = vlad_encoding
                     count += 1
             faiss_index = faiss.IndexFlatL2(32768)
             faiss_index.add(descriptors.cpu().numpy())
             _, indices = faiss_index.search(query.cpu().numpy(), 1)
+            count = 0
+            for file in os.listdir('data/'):
+                if file.endswith('.png'):
+                    if count in indices:
+                        return send_file('data/' + file, mimetype='image/png')
+                    count += 1
 
-        return {'hello': json.dumps(indices.tolist())}
+        return {'neighbours': 'no neighbours found'}
 
 class SemanticSeg(Resource):
     def get(self):
