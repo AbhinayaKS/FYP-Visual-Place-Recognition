@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'dart:convert';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
@@ -15,7 +16,7 @@ class UploadPhoto extends StatefulWidget {
 
 class MyHomePageState extends State<UploadPhoto> {
   File? _image;
-  String? _imageUrl;
+  Uint8List? _imageUrl;
 
   final _picker = ImagePicker();
 
@@ -45,10 +46,12 @@ class MyHomePageState extends State<UploadPhoto> {
     request.headers.addAll({'Accept': 'image/png', 'Connection': 'Keep-Alive'});
     var response = await request.send();
     debugPrint('Response: ${response.headers}');
+    // var response = await http
+    //     .get(Uri.parse('http://192.168.0.103:5000/nearestNeighbours'));
     if (response.statusCode == 200) {
       var bytes = await response.stream.toBytes();
       setState(() {
-        _imageUrl = bytes.toString();
+        _imageUrl = bytes;
       });
     } else {
       debugPrint('Error: ${response.statusCode}');
@@ -61,7 +64,7 @@ class MyHomePageState extends State<UploadPhoto> {
       appBar: AppBar(
         title: Text(widget.title),
       ),
-      body: Center(
+      body: SingleChildScrollView(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: <Widget>[
@@ -77,9 +80,7 @@ class MyHomePageState extends State<UploadPhoto> {
               child: const Text('Get nearest neighbours'),
             ),
             const SizedBox(height: 20),
-            _imageUrl != null
-                ? Image.memory(base64Decode(_imageUrl!))
-                : Container(),
+            _imageUrl != null ? Image.memory(_imageUrl!) : Container(),
           ],
         ),
       ),
