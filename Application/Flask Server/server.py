@@ -65,61 +65,56 @@ def setupModel():
     print('Loaded model from {}'.format(resume_ckpt))
 
 class getNearestNeighbours(Resource):
-    def post(self):
-        byte_io = BytesIO()
+    def get(self):
 
-        # Write the image data to the byte stream
-        # Replace 'your_image.png' with the path to your image file
-        with open('data/primeArea.png', 'rb') as f:
-            byte_io.write(f.read())
-            byte_io.seek(0)
-        response = make_response(send_file(byte_io, mimetype='image/png'))
-        response.headers['Connection'] = 'Keep-Alive'
-
-        return response
-        # return send_file('data/' + 'primeArea.png', mimetype='image/png')
-        # return send_file(byte_io, mimetype='image/png')
-        # with torch.no_grad():
-        #     descriptors = torch.empty(10, 32768).to(device)
-        #     query = torch.empty(1, 32768).to(device)
-        #     count = 0
-        #     if 'image' in request.args:
-        #         image = request.args['image']
-        #         img = Image.open('data/' + image)
-        #         img = transform_pipeline(img)
-        #         img = img.unsqueeze(0)  
-        #         img = Variable(img)
-        #         img = img.to(device)
-        #         image_encoding = model.encoder(img)
-        #         vlad_encoding = model.pool(image_encoding)
-        #         query[count] = vlad_encoding
-        #     else:
-        #         return {'error': 'No image specified'}
+        with torch.no_grad():
+            descriptors = torch.empty(10, 32768).to(device)
+            query = torch.empty(1, 32768).to(device)
+            count = 0
+            if 'image' in request.args:
+                image = request.args['image']
+                img = Image.open('data/' + image)
+                img = transform_pipeline(img)
+                img = img.unsqueeze(0)  
+                img = Variable(img)
+                img = img.to(device)
+                image_encoding = model.encoder(img)
+                vlad_encoding = model.pool(image_encoding)
+                query[count] = vlad_encoding
+            else:
+                return {'error': 'No image specified'}
             
-        #     for file in os.listdir('data/'):
-        #         if file.endswith(".png"):
-        #             if file == 'primeArea.png':
-        #                 continue
-        #             img = Image.open('data/' + file)
-        #             img = transform_pipeline(img)
-        #             img = img.unsqueeze(0)  
-        #             img = Variable(img)
-        #             img = img.to(device)
-        #             image_encoding = model.encoder(img)
-        #             vlad_encoding = model.pool(image_encoding)
-        #             descriptors[count] = vlad_encoding
-        #             count += 1
-        #     faiss_index = faiss.IndexFlatL2(32768)
-        #     faiss_index.add(descriptors.cpu().numpy())
-        #     _, indices = faiss_index.search(query.cpu().numpy(), 1)
-        #     count = 0
-        #     for file in os.listdir('data/'):
-        #         if file.endswith('.png'):
-        #             if count in indices:
-        #                 return send_file('data/' + file, mimetype='image/png')
-        #             count += 1
+            for file in os.listdir('data/'):
+                if file.endswith(".png"):
+                    if file == 'primeArea.png':
+                        continue
+                    img = Image.open('data/' + file)
+                    img = transform_pipeline(img)
+                    img = img.unsqueeze(0)  
+                    img = Variable(img)
+                    img = img.to(device)
+                    image_encoding = model.encoder(img)
+                    vlad_encoding = model.pool(image_encoding)
+                    descriptors[count] = vlad_encoding
+                    count += 1
+            faiss_index = faiss.IndexFlatL2(32768)
+            faiss_index.add(descriptors.cpu().numpy())
+            _, indices = faiss_index.search(query.cpu().numpy(), 1)
+            count = 0
+            for file in os.listdir('data/'):
+                if file.endswith('.png'):
+                    if count in indices:
+                        byte_io = BytesIO()
+                        with open('data/primeArea.png', 'rb') as f:
+                            byte_io.write(f.read())
+                            byte_io.seek(0)
+                        response = make_response(send_file(byte_io, mimetype='image/png'))
+                        response.headers['Connection'] = 'Keep-Alive'
 
-        # return {'neighbours': 'no neighbours found'}
+                        return response
+                    count += 1
+
+        return {'neighbours': 'no neighbours found'}
 
 class SemanticSeg(Resource):
     def get(self):
