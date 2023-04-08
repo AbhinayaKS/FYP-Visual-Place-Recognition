@@ -4,8 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 
-class UploadPhoto extends StatefulWidget {
-  const UploadPhoto({Key? key, required this.title}) : super(key: key);
+class TakePhoto extends StatefulWidget {
+  const TakePhoto({Key? key, required this.title}) : super(key: key);
 
   final String title;
 
@@ -13,14 +13,14 @@ class UploadPhoto extends StatefulWidget {
   MyHomePageState createState() => MyHomePageState();
 }
 
-class MyHomePageState extends State<UploadPhoto> {
+class MyHomePageState extends State<TakePhoto> {
   File? _image;
   String? _imageUrl;
 
   final _picker = ImagePicker();
 
   Future getImage() async {
-    final pickedFile = await _picker.pickImage(source: ImageSource.gallery);
+    final pickedFile = await _picker.pickImage(source: ImageSource.camera);
 
     setState(() {
       if (pickedFile != null) {
@@ -69,7 +69,7 @@ class MyHomePageState extends State<UploadPhoto> {
             const SizedBox(height: 20),
             ElevatedButton(
               onPressed: getImage,
-              child: const Text('Select an image'),
+              child: const Text('Take an image'),
             ),
             const SizedBox(height: 20),
             ElevatedButton(
